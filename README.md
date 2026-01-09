@@ -275,9 +275,7 @@ This project is licensed under the MIT License.
 - **Enhanced Styling**: Better contrast and accessibility in dark/light modes
 - **Complete Project Structure**: Full-stack application ready for deployment
 
-## 📞 Support
 
-For support, email support@edufeed.com or join our Slack channel.
 
 ## 📄 License
 
