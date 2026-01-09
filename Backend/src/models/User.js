@@ -30,6 +30,32 @@ const userSchema = new mongoose.Schema({
       return this.role === 'teacher';
     },
     trim: true
+  },
+  attendance: {
+    type: Number,
+    default: 0,
+    required: function() {
+      return this.role === 'student';
+    },
+    min: 0,
+    max: 100
+  },
+  marks: {
+    type: Number,
+    default: 0,
+    required: function() {
+      return this.role === 'student';
+    },
+    min: 0,
+    max: 100
+  },
+  learningType: {
+    type: String,
+    enum: ['Fast Learner', 'Slow Learner'],
+    default: 'Slow Learner',
+    required: function() {
+      return this.role === 'student';
+    }
   }
 }, {
   timestamps: true

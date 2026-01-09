@@ -9,7 +9,7 @@ const Navbar = ({ isLoggedIn, user, role, onLogout }) => {
     <nav className="border-b shadow-sm flex w-full mb-2 bg-blue-950 border-gray-200">
       <div className="flex h-15  w-full">
         {/* Logo Section */}
-        <div className="w-1/3 flex items-center">
+        <div className="w-2xl flex items-center">
           <Link to="/" className="flex items-center pl-4">
             <img src="/assets/logo.svg" alt="EduFeed Logo" className="h-22 w-auto" />
           </Link>
@@ -75,22 +75,8 @@ const Navbar = ({ isLoggedIn, user, role, onLogout }) => {
         </div>
 
         {/* Dashboard Links - Shown only if not logged in */}
-        {!isLoggedIn && (
-          <div className='flex items-center ml-80'>
-            <Link
-              to="/student/dashboard"
-              className="rounded-md bg-gray-100 px-8 py-1 text-sm font-medium text-black hover:bg-gray-200 transition-colors mr-5"
-            >
-              Student Dashboard
-            </Link>
-            <Link
-              to="/teacher/dashboard"
-              className="rounded-md bg-gray-100 px-8 py-1 text-sm font-medium text-black hover:bg-gray-200 transition-colors"
-            >
-              Teacher Dashboard
-            </Link>
-          </div>
-        )}
+        
+        
       </div>
     </nav>
   )

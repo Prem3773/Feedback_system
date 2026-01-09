@@ -16,9 +16,9 @@ const SectionCard = () => {
             <svg className="h-12 w-12 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
-            <h3 className="text-xl font-bold mt-4">AI Sentiment Analysis</h3>
+            <h3 className="text-xl font-bold mt-4">ML Based Sentiment Analysis</h3>
             <p className="mt-2 text-gray-600">
-              Automatically categorize feedback into positive, neutral, or negative sentiments to quickly gauge student opinion.
+               categorize feedback into positive, neutral, or negative sentiments  based on student feedback to quickly gauge student opinion.
             </p>
           </Card>
           <Card>

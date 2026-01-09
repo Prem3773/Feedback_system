@@ -7,7 +7,7 @@ const router = express.Router();
 // Register
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password, role, subject } = req.body;
+    const { username, email, password, role, subject, attendance, marks } = req.body;
 
     // Check if user already exists
     const existingUser = await User.findOne({ $or: [{ username }, { email }] });
@@ -16,7 +16,7 @@ router.post('/register', async (req, res) => {
     }
 
     // Create new user
-    const user = new User({ username, email, password, role, subject });
+    const user = new User({ username, email, password, role, subject, attendance, marks });
     await user.save();
 
     // Generate JWT token
@@ -25,6 +25,7 @@ router.post('/register', async (req, res) => {
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
+    console.log('Generated token with secret:', process.env.JWT_SECRET ? 'from env' : 'fallback');
     
     res.status(201).json({
       message: 'User registered successfully',
@@ -95,7 +96,7 @@ router.post('/logout', (req, res) => {
 // Get all users (admin only)
 router.get('/users', async (req, res) => {
   try {
-    const users = await User.find({}, 'username email role subject createdAt');
+    const users = await User.find({}, 'username email role subject attendance createdAt');
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -120,10 +121,17 @@ router.delete('/users/:id', async (req, res) => {
 // Update user (admin only)
 router.put('/users/:id', async (req, res) => {
   try {
-    const { username, email, role, subject } = req.body;
+    const { username, email, role, subject, attendance, marks } = req.body;
+    const updateData = { username, email, role, subject };
+    if (attendance !== undefined) {
+      updateData.attendance = attendance;
+    }
+    if (marks !== undefined) {
+      updateData.marks = marks;
+    }
     const user = await User.findByIdAndUpdate(
       req.params.id,
-      { username, email, role, subject },
+      updateData,
       { new: true, runValidators: true }
     );
     if (!user) {

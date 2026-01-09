@@ -29,6 +29,7 @@ const App = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const loggedIn = localStorage.getItem('isLoggedIn') === 'true';
@@ -39,6 +40,7 @@ const App = () => {
       setUser(storedUser);
       setRole(storedRole);
     }
+    setLoading(false);
   }, []);
 
   const handleLogin = (username, userRole) => {
@@ -59,6 +61,10 @@ const App = () => {
     localStorage.removeItem('user');
     localStorage.removeItem('role');
   };
+
+  if (loading) {
+    return null; // or a loading spinner
+  }
 
   return (
     // The main container that handles page layout

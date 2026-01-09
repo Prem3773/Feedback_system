@@ -14,7 +14,7 @@ const StudentFeedbackDashboard = ({ isDarkMode, user }) => {
             Welcome, {user || 'Student'}
           </h1>
           <p className={`text-lg text-center ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-            Provide feedback on various aspects of your student life. Your input is analyzed by AI for teachers and administrators.
+            Provide feedback on various aspects of your student life. Your input is analyzed by AI-ML for teachers and administrators.
           </p>
         </div>
 

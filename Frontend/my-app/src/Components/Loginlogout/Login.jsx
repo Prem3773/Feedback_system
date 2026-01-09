@@ -106,7 +106,7 @@ const Login = ({ onLogin }) => {
                       placeholder="Enter your password"
                     />
                   </div>
-                  <p className="text-xs text-center text-gray-500">Hint: Use 'alice' (Student), 'carol' (Teacher), or 'admin' (Admin) for the username to log in.</p>
+                  <p className="text-xs text-center text-gray-500"></p>
                   <div>
                     <Button type="submit" className="w-full py-3 text-lg bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:-purple-700 text-white font-semibold rounded-lg shadow-lg transform hover:scale-105 transition-all duration-200" variant="primary">Login</Button>
                   </div>

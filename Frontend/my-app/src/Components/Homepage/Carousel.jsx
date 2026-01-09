@@ -1,9 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import Cdata from './Cdata';
 
 const Carousel = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
-  const slides = Cdata;
+  const slides = [
+    {
+      image: "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80",
+      title: "Empowering Education",
+      description: "Enhance your teaching methodology with AI-driven insights."
+    },
+    {
+      image: "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80",
+      title: "Student-Centric Feedback",
+      description: "Understand your students' needs better through detailed analytics."
+    },
+    {
+      image: "https://images.unsplash.com/photo-1427504743050-dad1d8d17995?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80",
+      title: "Data-Driven Decisions",
+      description: "Make informed decisions to improve academic performance."
+    }
+  ];
 
   useEffect(() => {
     const interval = setInterval(() => {

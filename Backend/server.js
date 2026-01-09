@@ -1,10 +1,12 @@
+require("dotenv").config();
+console.log("SERVER ENV:", process.env.GEMINI_API_KEY);
+
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-require('dotenv').config();
-
 const authRoutes = require('./src/routes/auth');
 const feedbackRoutes = require('./src/routes/feedback');
 

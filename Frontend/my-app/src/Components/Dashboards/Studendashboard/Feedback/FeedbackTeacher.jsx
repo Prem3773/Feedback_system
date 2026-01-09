@@ -12,6 +12,8 @@ const FeedbackTeacher = () => {
   });
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [attendance, setAttendance] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     const fetchTeachers = async () => {
@@ -25,12 +27,47 @@ const FeedbackTeacher = () => {
         }
       } catch (error) {
         console.error('Error fetching teachers:', error);
+      }
+    };
+
+    const fetchUserAttendance = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          setError('User not authenticated');
+          setAttendance(null);
+          setLoading(false);
+          return;
+        }
+        const response = await fetch('http://localhost:3001/api/auth/users', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        if (!response.ok) {
+          setError('Failed to fetch user info');
+          setAttendance(null);
+          setLoading(false);
+          return;
+        }
+        const users = await response.json();
+        const userId = JSON.parse(atob(token.split('.')[1])).userId;
+        const currentUser = users.find(u => u._id === userId);
+        if (currentUser) {
+          setAttendance(currentUser.attendance !== undefined ? currentUser.attendance : null);
+        } else {
+          setAttendance(null);
+        }
+      } catch (error) {
+        console.error('Error fetching user info:', error);
+        setAttendance(null);
       } finally {
         setLoading(false);
       }
     };
 
     fetchTeachers();
+    fetchUserAttendance();
   }, []);
 
   const handleChange = (e) => {
@@ -40,6 +77,11 @@ const FeedbackTeacher = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    if (attendance !== null && attendance < 75) {
+      alert('You are not eligible to submit feedback due to insufficient attendance.');
+      return;
+    }
+
     if (!feedback.teacherId) {
       alert('Please select a teacher.');
       return;
@@ -47,6 +89,10 @@ const FeedbackTeacher = () => {
 
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        alert('You are not logged in. Please log in to submit feedback.');
+        return;
+      }
       const response = await fetch('http://localhost:3001/api/feedback', {
         method: 'POST',
         headers: {
@@ -67,8 +113,7 @@ const FeedbackTeacher = () => {
       });
 
       if (response.ok) {
-        alert('Feedback submitted successfully! It will be analyzed by AI for improvements.');
-        // Reset form
+        alert('Feedback submitted successfully');
         setFeedback({
           teacherId: '',
           teachingQuality: '',
@@ -86,6 +131,23 @@ const FeedbackTeacher = () => {
       alert('An error occurred while submitting feedback.');
     }
   };
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  if (attendance !== null && attendance < 75) {
+    return (
+      <div className='p-6 bg-gray-100 dark:bg-gray-800 min-h-screen'>
+        <div className='max-w-4xl mx-auto bg-white dark:bg-gray-700 rounded-lg shadow-md p-6'>
+          <h1 className='text-3xl font-bold text-gray-800 dark:text-white mb-6'>Teacher Feedback</h1>
+          <p className='text-red-600'>
+            You are not eligible to submit feedback due to insufficient attendance ({attendance}%).
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className='p-6 bg-gray-100 dark:bg-gray-800 min-h-screen'>
