@@ -5,6 +5,7 @@
   "scripts": {
     "start": "concurrently \"cd Backend && npm start\" \"cd Frontend/my-app && npm start\"",
     "dev": "concurrently \"cd Backend && npm run dev\" \"cd Frontend/my-app && npm start\"",
+     "build": "vite build",
     "install-all": "npm install && cd Backend && npm install && cd ../Frontend/my-app && npm install"
   },
   "devDependencies": {
