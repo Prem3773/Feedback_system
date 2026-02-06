@@ -236,7 +236,8 @@ Comments: ${f.responses.additionalComments}
 
     let aiOutput = { summary: "", improvementAreas: [] };
 
-    if (feedbackTexts.length > 0) {
+    // Require at least 3 feedback entries before generating AI insights
+    if (feedbackTexts.length >= 1) {
       try {
         aiOutput = await callGeminiInsights(
           feedbackTexts,
