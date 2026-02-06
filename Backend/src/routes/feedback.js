@@ -10,79 +10,71 @@ const router = express.Router();
 /* ---------------------------------------------
    ENV CONFIG
 --------------------------------------------- */
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-70b-versatile";
+const GROQ_ENDPOINT =
+  process.env.GROQ_ENDPOINT || "https://api.groq.com/openai/v1/chat/completions";
 
-console.log("Server env ready. Gemini key loaded:", !!GEMINI_API_KEY);
+console.log("Server env ready. Groq key loaded:", !!GROQ_API_KEY);
 
 /* ---------------------------------------------
-   GEMINI AI FUNCTION (100% FIXED)
+   GROQ AI FUNCTION
 --------------------------------------------- */
-const callGeminiInsights = async (feedbackTexts, teacherName = "Teacher") => {
-  if (!GEMINI_API_KEY) {
-    throw new Error("Gemini API key missing on server");
+const callGroqInsights = async (feedbackTexts, teacherName = "Teacher") => {
+  if (!GROQ_API_KEY) {
+    throw new Error("Groq API key missing on server");
   }
 
-  const prompt = `
-You are an academic teaching performance analyst.
+  const systemPrompt = [
+    "You are an academic teaching performance analyst.",
+    "Analyze student feedback and generate:",
+    "1) A concise summary (5-7 sentences)",
+    "2) Actionable areas for improvement (target 5-7 short bullets; use only what feedback supports)",
+    "Rules:",
+    "- Always give improvement areas even if feedback is positive.",
+    "- Use ONLY the feedback text.",
+    "- Do NOT mention any system or platform.",
+    "- Return ONLY valid JSON (no markdown, no code fences).",
+    "Output format:",
+    '{ "summary": "string", "improvementAreas": ["string", "string", "string"] }'
+  ].join("\n");
 
-Analyze the following student feedback and generate:
-1) A concise summary (5–7 sentences)
-2) Actionable areas for improvement (target 5–7 short bullets; use only what feedback supports)
-
-Rules:
-- Always give improvement areas even if feedback is positive
-- Use ONLY the feedback text
-- Do NOT mention any system or platform
-- Return ONLY valid JSON
-- No markdown, no code fences
-
-Output format:
-{
-  "summary": "string",
-  "improvementAreas": ["string", "string", "string"]
-}
-
-Teacher: ${teacherName}
-
-Student Feedback:
-${feedbackTexts.map((t) => "- " + t).join("\n")}
-`;
-
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+  const userPrompt = [
+    `Teacher: ${teacherName}`,
+    "Student Feedback:",
+    feedbackTexts.map((t) => "- " + t).join("\n")
+  ].join("\n");
 
   const body = {
-    contents: [
-      {
-        parts: [{ text: prompt }]
-      }
+    model: GROQ_MODEL,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt }
     ],
-    generationConfig: {
-      temperature: 0.3,
-      maxOutputTokens: 1024
-    }
+    temperature: 0.3,
+    max_tokens: 1024
   };
 
-  const response = await fetch(endpoint, {
+  const response = await fetch(GROQ_ENDPOINT, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${GROQ_API_KEY}`
     },
     body: JSON.stringify(body)
   });
 
   if (!response.ok) {
     const errText = await response.text();
-    console.error("Gemini HTTP Error:", response.status, errText);
-    throw new Error("Gemini API failed");
+    console.error("Groq HTTP Error:", response.status, errText);
+    throw new Error("Groq API failed");
   }
 
   const data = await response.json();
-  const outputText =
-    data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const outputText = data?.choices?.[0]?.message?.content || "";
 
   if (!outputText) {
-    throw new Error("Empty Gemini response");
+    throw new Error("Empty Groq response");
   }
 
   let parsed;
@@ -90,7 +82,7 @@ ${feedbackTexts.map((t) => "- " + t).join("\n")}
     parsed = JSON.parse(outputText);
   } catch {
     const match = outputText.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("Invalid Gemini JSON");
+    if (!match) throw new Error("Invalid Groq JSON");
     parsed = JSON.parse(match[0]);
   }
 
@@ -105,7 +97,7 @@ ${feedbackTexts.map((t) => "- " + t).join("\n")}
         .filter(Boolean);
       return cleaned.length
         ? Array.from(new Set(cleaned))
-        : ["Gemini did not return improvement areas"];
+        : ["Groq did not return improvement areas"];
     })()
   };
 };
@@ -234,18 +226,38 @@ Engagement: ${f.responses.engagement}
 Comments: ${f.responses.additionalComments}
 `);
 
-    let aiOutput = { summary: "", improvementAreas: [] };
+    let aiOutput = {
+      summary: "",
+      improvementAreas: []
+    };
 
-    // Require at least 3 feedback entries before generating AI insights
+    // Generate AI insights when at least one feedback exists
     if (feedbackTexts.length >= 1) {
       try {
-        aiOutput = await callGeminiInsights(
+        aiOutput = await callGroqInsights(
           feedbackTexts,
           req.user.username || "Teacher"
         );
       } catch (err) {
-        console.error("Gemini failed:", err.message);
+        console.error("Groq failed:", err.message);
+        aiOutput = {
+          summary: `Groq error: ${err.message || "unknown error"}`,
+          improvementAreas: []
+        };
       }
+    } else {
+      aiOutput = {
+        summary: "No feedback yet to analyze.",
+        improvementAreas: []
+      };
+    }
+
+    // Ensure non-empty strings/arrays so frontend won't show "unavailable"
+    if (!aiOutput.summary || !aiOutput.summary.trim()) {
+      aiOutput.summary = "AI did not return a summary. Try adding more detailed feedback.";
+    }
+    if (!Array.isArray(aiOutput.improvementAreas) || aiOutput.improvementAreas.length === 0) {
+      aiOutput.improvementAreas = ["AI did not return improvement areas. Try adding more detailed feedback."];
     }
 
     res.json({
