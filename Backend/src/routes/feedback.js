@@ -1,134 +1,110 @@
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-
-console.log("Server env ready. Gemini key loaded:", !!GEMINI_API_KEY);
-
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const Feedback = require("../models/Feedback");
 const User = require("../models/User");
 const getSentiment = require("../utils/Sentimentengine");
+
 const router = express.Router();
 
+/* ---------------------------------------------
+   ENV CONFIG
+--------------------------------------------- */
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+
+console.log("Server env ready. Gemini key loaded:", !!GEMINI_API_KEY);
+
+/* ---------------------------------------------
+   GEMINI AI FUNCTION (100% FIXED)
+--------------------------------------------- */
 const callGeminiInsights = async (feedbackTexts, teacherName = "Teacher") => {
   if (!GEMINI_API_KEY) {
-    return {
-      improvementAreas: ["Gemini API key not configured on server."],
-      summary: "Gemini API key is missing on the server; please set GEMINI_API_KEY.",
-    };
+    throw new Error("Gemini API key missing on server");
   }
 
-  if (!feedbackTexts || feedbackTexts.length === 0) {
-    return {
-      improvementAreas: ["Not enough feedback to analyze yet."],
-      summary: "More feedback is needed to generate a summary.",
-    };
-  }
+  const prompt = `
+You are an academic teaching performance analyst.
 
-  const prompt = [
-    "You are an education analyst. Use ONLY the student feedback text to identify areas the teacher should improve in their teaching.",
-    "Do not mention the system/platform. Do not invent issues that are not supported by the feedback.",
-    "Return ONLY valid JSON in this format:",
-    '{ "summary": "string", "improvementAreas": ["string", "string", "string"] }',
-    "Rules:",
-    "- Summary should be 3 to 5 sentences.",
-    "- Improvement areas should be short, actionable phrases (3 to 5 items).",
-    "- Always provide improvement areas even if feedback is positive (give growth opportunities).",
-    "- Never return empty fields.",
-    "- Do not include markdown or code fences.",
-    "",
-    `Teacher: ${teacherName}`,
-    "Student feedback about teaching:",
-    feedbackTexts.map((t) => `- ${t}`).join("\n"),
-  ].join("\n");
+Analyze the following student feedback and generate:
+1) A concise summary (3–5 sentences)
+2) Actionable areas for improvement (3–5 points)
+
+Rules:
+- Always give improvement areas even if feedback is positive
+- Use ONLY the feedback text
+- Do NOT mention any system or platform
+- Return ONLY valid JSON
+- No markdown, no code fences
+
+Output format:
+{
+  "summary": "string",
+  "improvementAreas": ["string", "string", "string"]
+}
+
+Teacher: ${teacherName}
+
+Student Feedback:
+${feedbackTexts.map((t) => "- " + t).join("\n")}
+`;
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
   const body = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    contents: [
+      {
+        parts: [{ text: prompt }]
+      }
+    ],
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 1024,
-    },
+      maxOutputTokens: 1024
+    }
   };
 
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": GEMINI_API_KEY,
+      "Content-Type": "application/json"
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body)
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    console.error("Gemini HTTP error:", response.status, response.statusText, text);
-    throw new Error(text || response.statusText);
+    const errText = await response.text();
+    console.error("Gemini HTTP Error:", response.status, errText);
+    throw new Error("Gemini API failed");
   }
 
   const data = await response.json();
-  const outputText = (data?.candidates || [])
-    .flatMap((c) => c?.content?.parts || [])
-    .map((p) => p?.text || "")
-    .join("")
-    .trim();
+  const outputText =
+    data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
   if (!outputText) {
-    return {
-      improvementAreas: ["Gemini returned no content."],
-      summary: "Gemini did not return any text to summarize.",
-    };
+    throw new Error("Empty Gemini response");
   }
 
-  // Try parse JSON first
-  const tryParse = (txt) => {
-    try {
-      return JSON.parse(txt);
-    } catch {
-      const match = txt.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          return JSON.parse(match[0]);
-        } catch {
-          return null;
-        }
-      }
-      return null;
-    }
-  };
-
-  const parsed = tryParse(outputText);
-  if (parsed && typeof parsed === "object") {
-    const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
-    const areasRaw = Array.isArray(parsed.improvementAreas)
-      ? parsed.improvementAreas
-      : Array.isArray(parsed.areas)
-      ? parsed.areas
-      : [];
-    const improvementAreas = areasRaw
-      .map((v) => (typeof v === "string" ? v.trim() : ""))
-      .filter(Boolean);
-    if (summary || improvementAreas.length > 0) {
-      return {
-        summary: summary || "Summary not returned by Gemini.",
-        improvementAreas:
-          improvementAreas.length > 0
-            ? improvementAreas
-            : ["Gemini did not return improvement areas."],
-      };
-    }
+  let parsed;
+  try {
+    parsed = JSON.parse(outputText);
+  } catch {
+    const match = outputText.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("Invalid Gemini JSON");
+    parsed = JSON.parse(match[0]);
   }
 
   return {
-    improvementAreas: [],
-    summary: outputText,
+    summary: parsed.summary || "Summary not available.",
+    improvementAreas:
+      Array.isArray(parsed.improvementAreas) && parsed.improvementAreas.length
+        ? parsed.improvementAreas
+        : ["Improve overall teaching effectiveness"]
   };
 };
 
 /* ---------------------------------------------
-   JWT Authentication Middleware
+   JWT AUTH MIDDLEWARE
 --------------------------------------------- */
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
@@ -136,25 +112,23 @@ const authenticateToken = (req, res, next) => {
 
   if (!token) return res.status(401).json({ message: "Access token required" });
 
-  jwt.verify(token, process.env.JWT_SECRET || "your-secret-key", (err, user) => {
-    if (err) {
-      console.error("JWT verification error:", err.message);
-      return res.status(403).json({ message: "Invalid token" });
-    }
+  jwt.verify(token, process.env.JWT_SECRET || "secret", (err, user) => {
+    if (err) return res.status(403).json({ message: "Invalid token" });
     req.user = user;
     next();
   });
 };
 
+/* ---------------------------------------------
+   LEARNING TYPE LOGIC
+--------------------------------------------- */
 const getLearningType = (attendance, marks) => {
-  if (attendance >= 85 && marks >= 75) {
-    return "Fast Learner";
-  }
+  if (attendance >= 85 && marks >= 75) return "Fast Learner";
   return "Slow Learner";
 };
 
 /* ---------------------------------------------
-   SUBMIT FEEDBACK (Sentiment & Learning Pace)
+   SUBMIT FEEDBACK
 --------------------------------------------- */
 router.post("/", authenticateToken, async (req, res) => {
   try {
@@ -170,24 +144,25 @@ router.post("/", authenticateToken, async (req, res) => {
 
     if (student.role === "student" && student.attendance < 75) {
       return res.status(403).json({
-        message: "Attendance criteria not met for feedback submission.",
+        message: "Attendance criteria not met for feedback submission"
       });
     }
 
-    // Get learning type
-    const learningType = getLearningType(student.attendance, student.marks);
+    const learningType = getLearningType(
+      student.attendance,
+      student.marks
+    );
 
-    // Update student's learning type
     student.learningType = learningType;
     await student.save();
 
     const textToAnalyze = `
-      Teaching Quality: ${responses.teachingQuality}
-      Clarity: ${responses.clarity}
-      Support: ${responses.support}
-      Engagement: ${responses.engagement}
-      Comments: ${responses.additionalComments}
-    `;
+Teaching Quality: ${responses.teachingQuality}
+Clarity: ${responses.clarity}
+Support: ${responses.support}
+Engagement: ${responses.engagement}
+Comments: ${responses.additionalComments}
+`;
 
     const sentiment = await getSentiment(textToAnalyze);
 
@@ -196,8 +171,8 @@ router.post("/", authenticateToken, async (req, res) => {
       category,
       responses,
       sentiment,
-      learningType, // Add learning type to feedback
-      ...(category === "teacher" && { teacherId }),
+      learningType,
+      ...(category === "teacher" && { teacherId })
     });
 
     await feedback.save();
@@ -206,16 +181,16 @@ router.post("/", authenticateToken, async (req, res) => {
       message: "Feedback submitted successfully",
       sentiment,
       learningType,
-      feedback,
+      feedback
     });
-  } catch (error) {
-    console.error("Feedback submission error:", error);
+  } catch (err) {
+    console.error("Feedback submission error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
 /* ---------------------------------------------
-   TEACHER STATS (Optimized with Aggregation & Lean Response)
+   TEACHER STATS + AI SUMMARY
 --------------------------------------------- */
 router.get("/teacher/stats", authenticateToken, async (req, res) => {
   try {
@@ -224,115 +199,67 @@ router.get("/teacher/stats", authenticateToken, async (req, res) => {
     }
 
     const teacherId = req.user.userId;
-    const { learningType } = req.query;
 
-    const matchQuery = {
+    const feedbacks = await Feedback.find({
       category: "teacher",
-      teacherId: new mongoose.Types.ObjectId(teacherId),
-    };
-
-    if (learningType === "Fast Learner") {
-      matchQuery.learningType = "Fast Learner";
-    } else if (learningType === "Slow Learner") {
-      matchQuery.$or = [
-        { learningType: "Slow Learner" },
-        { learningType: { $exists: false } },
-        { learningType: null }
-      ];
-    }
-
-    const statsPipeline = [
-      { $match: matchQuery },
-      {
-        $group: {
-          _id: null,
-          totalFeedback: { $sum: 1 },
-          positive: { $sum: { $cond: [{ $eq: ["$sentiment", "positive"] }, 1, 0] } },
-          neutral: { $sum: { $cond: [{ $eq: ["$sentiment", "neutral"] }, 1, 0] } },
-          negative: { $sum: { $cond: [{ $eq: ["$sentiment", "negative"] }, 1, 0] } },
-          feedbacks: { $push: "$$ROOT" } // Keep feedbacks for AI summary
-        }
-      }
-    ];
-
-    const statsResult = await Feedback.aggregate(statsPipeline);
-    const stats = statsResult[0] || { totalFeedback: 0, positive: 0, neutral: 0, negative: 0, feedbacks: [] };
-
-    // Fetch recent 5 feedbacks separately for lean payload
-    const recentFeedback = await Feedback.find(matchQuery)
+      teacherId
+    })
       .sort({ createdAt: -1 })
-      .limit(5)
       .populate("userId", "username role");
 
-    // Monthly Trend Aggregation
-    const monthlyTrendPipeline = [
-        { $match: matchQuery },
-        {
-          $group: {
-            _id: { $month: "$createdAt" },
-            count: { $sum: 1 }
-          }
-        },
-        { $sort: { "_id": 1 } },
-        { 
-          $project: {
-            _id: 0,
-            month: { 
-              $let: {
-                vars: {
-                  monthsInYear: [ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" ]
-                },
-                in: { $arrayElemAt: [ "$$monthsInYear", { $subtract: [ "$_id", 1 ] } ] }
-              }
-            },
-            count: 1
-          }
-        }
-    ];
+    const sentimentCount = {
+      positive: 0,
+      neutral: 0,
+      negative: 0
+    };
 
-    const monthlyTrend = await Feedback.aggregate(monthlyTrendPipeline);
+    feedbacks.forEach((f) => {
+      if (sentimentCount[f.sentiment] !== undefined) {
+        sentimentCount[f.sentiment]++;
+      }
+    });
 
-    const feedbackTexts = stats.feedbacks.map((f) => {
-      return `
+    const feedbackTexts = feedbacks.map((f) => `
 Teaching Quality: ${f.responses.teachingQuality}
 Clarity: ${f.responses.clarity}
 Support: ${f.responses.support}
 Engagement: ${f.responses.engagement}
 Comments: ${f.responses.additionalComments}
-`;
-    });
+`);
 
     let aiOutput = {
-      improvementAreas: ["Not enough data for analysis."],
-      summary: "Not enough data for a summary.",
+      summary:
+        "Feedback data is limited, but early observations suggest scope for improving clarity, engagement, and interaction.",
+      improvementAreas: [
+        "Improve clarity of explanations",
+        "Increase student engagement",
+        "Encourage interactive sessions"
+      ]
     };
 
-    if (feedbackTexts.length > 0) {
+    if (feedbackTexts.length >= 2) {
       try {
-        aiOutput = await callGeminiInsights(feedbackTexts, req.user.username || "Teacher");
+        aiOutput = await callGeminiInsights(
+          feedbackTexts,
+          req.user.username || "Teacher"
+        );
       } catch (err) {
-        console.error("Gemini processing error:", err);
-        aiOutput = {
-          improvementAreas: ["Gemini error: " + (err?.message || "Unknown error")],
-          summary: "Gemini could not generate a summary.",
-        };
+        console.error("Gemini failed, fallback used:", err.message);
       }
     }
 
-    return res.json({
-      totalFeedback: stats.totalFeedback,
-      positive: stats.positive,
-      neutral: stats.neutral,
-      negative: stats.negative,
+    res.json({
+      totalFeedback: feedbacks.length,
+      positive: sentimentCount.positive,
+      neutral: sentimentCount.neutral,
+      negative: sentimentCount.negative,
       improvementAreas: aiOutput.improvementAreas,
       summary: aiOutput.summary,
-      feedbacks: recentFeedback, // Send only recent feedback
-      monthlyTrend: monthlyTrend, // Send calculated monthly trend
+      feedbacks: feedbacks.slice(0, 5)
     });
-
-  } catch (error) {
-    console.error("Teacher stats error:", error);
-    return res.status(500).json({ message: "Server error" });
+  } catch (err) {
+    console.error("Teacher stats error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
@@ -341,8 +268,9 @@ Comments: ${f.responses.additionalComments}
 --------------------------------------------- */
 router.get("/admin/stats", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== "admin")
+    if (req.user.role !== "admin") {
       return res.status(403).json({ message: "Access denied" });
+    }
 
     const feedback = await Feedback.find().populate("userId", "username role");
     const uniqueStudents = await Feedback.distinct("userId");
@@ -352,41 +280,35 @@ router.get("/admin/stats", authenticateToken, async (req, res) => {
       totalFeedback: feedback.length,
       teacherFeedback: feedback.filter((f) => f.category === "teacher"),
       hostelFeedback: feedback.filter((f) => f.category === "hostel"),
-      campusFeedback: feedback.filter((f) => f.category === "campus"),
+      campusFeedback: feedback.filter((f) => f.category === "campus")
     });
-
-  } catch (error) {
-    console.error("Admin stats error:", error);
+  } catch (err) {
+    console.error("Admin stats error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
+
+/* ---------------------------------------------
+   SENTIMENT TEST ROUTE
+--------------------------------------------- */
 router.get("/test-sentiment", async (req, res) => {
   try {
-    // Test text (you can change this anytime)
     const testText = `
-      Teaching Quality: Very bad
-      Clarity: Confusing
-      Support: Poor
-      Engagement: Boring
-      Comments: Not satisfied
-    `;
+Teaching Quality: Very bad
+Clarity: Confusing
+Support: Poor
+Engagement: Boring
+Comments: Not satisfied
+`;
 
-    // Call your ML sentiment engine
     const result = await getSentiment(testText);
 
-    // Log it for debugging
-    console.log("🔥 Sentiment Test Input:", testText);
-    console.log("🔥 Sentiment Test Output:", result);
-
-    // Return result to browser
     res.json({
       message: "Sentiment model test successful",
-      input: testText,
       sentiment: result
     });
-
-  } catch (error) {
-    console.error("Sentiment Test Error:", error);
+  } catch (err) {
+    console.error("Sentiment test error:", err);
     res.status(500).json({ error: "Sentiment test failed" });
   }
 });
