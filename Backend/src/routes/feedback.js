@@ -11,7 +11,8 @@ const router = express.Router();
    ENV CONFIG
 --------------------------------------------- */
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-70b-versatile";
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+const GROQ_FALLBACK_MODEL = "llama-3.3-70b-versatile";
 const GROQ_ENDPOINT =
   process.env.GROQ_ENDPOINT || "https://api.groq.com/openai/v1/chat/completions";
 
@@ -45,32 +46,45 @@ const callGroqInsights = async (feedbackTexts, teacherName = "Teacher") => {
     feedbackTexts.map((t) => "- " + t).join("\n")
   ].join("\n");
 
-  const body = {
+  const baseBody = {
     model: GROQ_MODEL,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt }
     ],
     temperature: 0.3,
-    max_tokens: 1024
+    max_tokens: 1024,
+    response_format: { type: "json_object" }
   };
 
-  const response = await fetch(GROQ_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${GROQ_API_KEY}`
-    },
-    body: JSON.stringify(body)
-  });
+  const callGroq = async (body) => {
+    const response = await fetch(GROQ_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${GROQ_API_KEY}`
+      },
+      body: JSON.stringify(body)
+    });
+    const errText = !response.ok ? await response.text() : null;
+    return { ok: response.ok, status: response.status, errText, data: response.ok ? await response.json() : null };
+  };
 
-  if (!response.ok) {
-    const errText = await response.text();
-    console.error("Groq HTTP Error:", response.status, errText);
+  let resp = await callGroq(baseBody);
+
+  // Auto-retry with fallback if model is decommissioned
+  if (!resp.ok && resp.errText && resp.errText.includes("model `llama-3.1-70b-versatile` has been decommissioned")) {
+    const retryBody = { ...baseBody, model: GROQ_FALLBACK_MODEL };
+    console.warn("Groq model deprecated, retrying with fallback:", GROQ_FALLBACK_MODEL);
+    resp = await callGroq(retryBody);
+  }
+
+  if (!resp.ok) {
+    console.error("Groq HTTP Error:", resp.status, resp.errText);
     throw new Error("Groq API failed");
   }
 
-  const data = await response.json();
+  const data = resp.data;
   const outputText = data?.choices?.[0]?.message?.content || "";
 
   if (!outputText) {
