@@ -55,12 +55,16 @@ const callGeminiInsights = async (feedbackTexts, teacherName = "Teacher") => {
 
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": GEMINI_API_KEY,
+    },
     body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const text = await response.text();
+    console.error("Gemini HTTP error:", response.status, response.statusText, text);
     throw new Error(text || response.statusText);
   }
 
