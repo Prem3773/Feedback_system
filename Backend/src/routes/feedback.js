@@ -27,8 +27,8 @@ const callGeminiInsights = async (feedbackTexts, teacherName = "Teacher") => {
 You are an academic teaching performance analyst.
 
 Analyze the following student feedback and generate:
-1) A concise summary (3–5 sentences)
-2) Actionable areas for improvement (3–5 points)
+1) A concise summary (5–7 sentences)
+2) Actionable areas for improvement (target 5–7 short bullets; use only what feedback supports)
 
 Rules:
 - Always give improvement areas even if feedback is positive
@@ -96,10 +96,17 @@ ${feedbackTexts.map((t) => "- " + t).join("\n")}
 
   return {
     summary: parsed.summary || "Summary not available.",
-    improvementAreas:
-      Array.isArray(parsed.improvementAreas) && parsed.improvementAreas.length
+    improvementAreas: (() => {
+      const raw = Array.isArray(parsed.improvementAreas)
         ? parsed.improvementAreas
-        : ["Improve overall teaching effectiveness"]
+        : [];
+      const cleaned = raw
+        .map((v) => (typeof v === "string" ? v.trim() : ""))
+        .filter(Boolean);
+      return cleaned.length
+        ? Array.from(new Set(cleaned))
+        : ["Gemini did not return improvement areas"];
+    })()
   };
 };
 
@@ -227,24 +234,16 @@ Engagement: ${f.responses.engagement}
 Comments: ${f.responses.additionalComments}
 `);
 
-    let aiOutput = {
-      summary:
-        "Feedback data is limited, but early observations suggest scope for improving clarity, engagement, and interaction.",
-      improvementAreas: [
-        "Improve clarity of explanations",
-        "Increase student engagement",
-        "Encourage interactive sessions"
-      ]
-    };
+    let aiOutput = { summary: "", improvementAreas: [] };
 
-    if (feedbackTexts.length >= 2) {
+    if (feedbackTexts.length > 0) {
       try {
         aiOutput = await callGeminiInsights(
           feedbackTexts,
           req.user.username || "Teacher"
         );
       } catch (err) {
-        console.error("Gemini failed, fallback used:", err.message);
+        console.error("Gemini failed:", err.message);
       }
     }
 
