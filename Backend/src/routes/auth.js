@@ -8,6 +8,10 @@ const router = express.Router();
 router.post('/register', async (req, res) => {
   try {
     const { username, email, password, role, subject, attendance, marks } = req.body;
+    const normalizedRole = role ? role.toLowerCase() : role;
+    const isStudent = normalizedRole === 'student';
+    const hasAttendance = attendance !== undefined && attendance !== null;
+    const initialAttendance = isStudent && !hasAttendance ? 80 : attendance;
 
     // Check if user already exists
     const existingUser = await User.findOne({ $or: [{ username }, { email }] });
@@ -16,7 +20,16 @@ router.post('/register', async (req, res) => {
     }
 
     // Create new user
-    const user = new User({ username, email, password, role, subject, attendance, marks });
+    const user = new User({
+      username,
+      email,
+      password,
+      role: normalizedRole,
+      subject,
+      attendance: initialAttendance,
+      marks,
+      attendanceVerified: isStudent ? (initialAttendance !== undefined && initialAttendance !== null) : true
+    });
     await user.save();
 
     // Generate JWT token
@@ -96,7 +109,7 @@ router.post('/logout', (req, res) => {
 // Get all users (admin only)
 router.get('/users', async (req, res) => {
   try {
-    const users = await User.find({}, 'username email role subject attendance createdAt');
+    const users = await User.find({}, 'username email role subject attendance attendanceVerified createdAt');
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -125,6 +138,7 @@ router.put('/users/:id', async (req, res) => {
     const updateData = { username, email, role, subject };
     if (attendance !== undefined) {
       updateData.attendance = attendance;
+      updateData.attendanceVerified = true;
     }
     if (marks !== undefined) {
       updateData.marks = marks;

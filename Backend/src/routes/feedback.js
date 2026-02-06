@@ -131,15 +131,6 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
-
-/* ---------------------------------------------
-   LEARNING TYPE LOGIC
---------------------------------------------- */
-const getLearningType = (attendance, marks) => {
-  if (attendance >= 85 && marks >= 75) return "Fast Learner";
-  return "Slow Learner";
-};
-
 /* ---------------------------------------------
    SUBMIT FEEDBACK
 --------------------------------------------- */
@@ -155,19 +146,15 @@ router.post("/", authenticateToken, async (req, res) => {
     const student = await User.findById(userId);
     if (!student) return res.status(404).json({ message: "User not found" });
 
-    if (student.role === "student" && student.attendance < 75) {
+    const shouldEnforceAttendance =
+      student.role === "student" && student.attendanceVerified !== false;
+
+    if (shouldEnforceAttendance && student.attendance < 75) {
       return res.status(403).json({
         message: "Attendance criteria not met for feedback submission"
       });
     }
 
-    const learningType = getLearningType(
-      student.attendance,
-      student.marks
-    );
-
-    student.learningType = learningType;
-    await student.save();
 
     const textToAnalyze = `
 Teaching Quality: ${responses.teachingQuality}
@@ -184,7 +171,6 @@ Comments: ${responses.additionalComments}
       category,
       responses,
       sentiment,
-      learningType,
       ...(category === "teacher" && { teacherId })
     });
 
@@ -193,7 +179,6 @@ Comments: ${responses.additionalComments}
     res.status(201).json({
       message: "Feedback submitted successfully",
       sentiment,
-      learningType,
       feedback
     });
   } catch (err) {

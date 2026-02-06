@@ -33,12 +33,16 @@ const userSchema = new mongoose.Schema({
   },
   attendance: {
     type: Number,
-    default: 0,
+    default: 80,
     required: function() {
       return this.role === 'student';
     },
     min: 0,
     max: 100
+  },
+  attendanceVerified: {
+    type: Boolean,
+    default: true
   },
   marks: {
     type: Number,
@@ -48,14 +52,6 @@ const userSchema = new mongoose.Schema({
     },
     min: 0,
     max: 100
-  },
-  learningType: {
-    type: String,
-    enum: ['Fast Learner', 'Slow Learner'],
-    default: 'Slow Learner',
-    required: function() {
-      return this.role === 'student';
-    }
   }
 }, {
   timestamps: true

@@ -30,11 +30,6 @@ const feedbackSchema = new mongoose.Schema({
   aiAnalysis: {
     type: Object,
     default: {}
-  },
-  learningType: {
-    type: String,
-    enum: ['Fast Learner', 'Slow Learner'],
-    required: true
   }
 }, {
   timestamps: true
