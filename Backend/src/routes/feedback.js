@@ -21,13 +21,17 @@ console.log("Server env ready. Groq key loaded:", !!GROQ_API_KEY);
 /* ---------------------------------------------
    GROQ AI FUNCTION
 --------------------------------------------- */
-const callGroqInsights = async (feedbackTexts, teacherName = "Teacher") => {
-  if (!GROQ_API_KEY) {
-    throw new Error("Groq API key missing on server");
-  }
+const callGroqInsights = async (feedbackTexts, options = {}) => {
+  const opts = typeof options === "string"
+    ? { entityName: options, entityType: "Teacher" }
+    : options || {};
+
+  const entityType = opts.entityType || "Teacher";
+  const entityName = opts.entityName || "Teacher";
+  const roleDescriptor = opts.roleDescriptor || "academic service quality analyst";
 
   const systemPrompt = [
-    "You are an academic teaching performance analyst.",
+    `You are an ${roleDescriptor} focused on ${entityType.toLowerCase()} feedback.`,
     "Analyze student feedback and generate:",
     "1) A concise summary (5-7 sentences)",
     "2) Actionable areas for improvement (target 5-7 short bullets; use only what feedback supports)",
@@ -41,10 +45,39 @@ const callGroqInsights = async (feedbackTexts, teacherName = "Teacher") => {
   ].join("\n");
 
   const userPrompt = [
-    `Teacher: ${teacherName}`,
+    `${entityType}: ${entityName}`,
     "Student Feedback:",
     feedbackTexts.map((t) => "- " + t).join("\n")
   ].join("\n");
+
+  const localFallback = () => {
+    const joined = feedbackTexts.join(" ");
+    const summary = joined
+      ? `Student highlights: ${joined.slice(0, 400)}`
+      : "Not enough feedback to summarize.";
+
+    const negativeMarkers = ["bad", "poor", "issue", "problem", "dirty", "leak", "broken", "smell", "smelly", "lukewarm", "stale", "hair"];
+    const improvementAreas = Array.from(
+      new Set(
+        feedbackTexts
+          .flatMap((t) =>
+            t
+              .split(/[\.\!\?\n]/)
+              .map((s) => s.trim())
+              .filter((s) => s && negativeMarkers.some((m) => s.toLowerCase().includes(m)))
+          )
+      )
+    ).filter(Boolean);
+
+    const finalAreas = improvementAreas.length
+      ? improvementAreas.slice(0, 5)
+      : ["Collect more detailed feedback to generate AI improvement areas."];
+
+    return {
+      summary,
+      improvementAreas: finalAreas
+    };
+  };
 
   const baseBody = {
     model: GROQ_MODEL,
@@ -56,6 +89,11 @@ const callGroqInsights = async (feedbackTexts, teacherName = "Teacher") => {
     max_tokens: 1024,
     response_format: { type: "json_object" }
   };
+
+  // If no key is configured, fall back to a lightweight local summarizer.
+  if (!GROQ_API_KEY) {
+    return localFallback();
+  }
 
   const callGroq = async (body) => {
     const response = await fetch(GROQ_ENDPOINT, {
@@ -81,14 +119,14 @@ const callGroqInsights = async (feedbackTexts, teacherName = "Teacher") => {
 
   if (!resp.ok) {
     console.error("Groq HTTP Error:", resp.status, resp.errText);
-    throw new Error("Groq API failed");
+    return localFallback();
   }
 
   const data = resp.data;
   const outputText = data?.choices?.[0]?.message?.content || "";
 
   if (!outputText) {
-    throw new Error("Empty Groq response");
+    return localFallback();
   }
 
   let parsed;
@@ -96,7 +134,7 @@ const callGroqInsights = async (feedbackTexts, teacherName = "Teacher") => {
     parsed = JSON.parse(outputText);
   } catch {
     const match = outputText.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("Invalid Groq JSON");
+    if (!match) return localFallback();
     parsed = JSON.parse(match[0]);
   }
 
@@ -114,6 +152,39 @@ const callGroqInsights = async (feedbackTexts, teacherName = "Teacher") => {
         : ["Groq did not return improvement areas"];
     })()
   };
+};
+
+const buildFeedbackText = (category = "", responses = {}) => {
+  const safe = responses || {};
+  const lowerCategory = (category || "").toLowerCase();
+
+  if (lowerCategory === "hostel") {
+    return [
+      `Cleanliness: ${safe.cleanliness || ""}`,
+      `Facilities: ${safe.facilities || ""}`,
+      `Food Quality: ${safe.foodQuality || ""}`,
+      `Maintenance: ${safe.maintenance || ""}`,
+      `Comments: ${safe.additionalComments || ""}`
+    ].join("\n");
+  }
+
+  if (lowerCategory === "campus") {
+    return [
+      `Cleaning: ${safe.cleaning || safe.cleanliness || ""}`,
+      `Water Purity: ${safe.waterPurity || ""}`,
+      `Infrastructure: ${safe.infrastructure || ""}`,
+      `Safety: ${safe.safety || ""}`,
+      `Comments: ${safe.additionalComments || ""}`
+    ].join("\n");
+  }
+
+  return [
+    `Teaching Quality: ${safe.teachingQuality || ""}`,
+    `Clarity: ${safe.clarity || ""}`,
+    `Support: ${safe.support || ""}`,
+    `Engagement: ${safe.engagement || ""}`,
+    `Comments: ${safe.additionalComments || ""}`
+  ].join("\n");
 };
 
 /* ---------------------------------------------
@@ -136,10 +207,15 @@ const authenticateToken = (req, res, next) => {
 --------------------------------------------- */
 router.post("/", authenticateToken, async (req, res) => {
   try {
-    const { category, responses, teacherId } = req.body;
+    const { responses = {}, teacherId } = req.body;
+    const category = (req.body.category || "").toLowerCase();
     const userId = req.user.userId;
 
-    if (teacherId && !mongoose.Types.ObjectId.isValid(teacherId)) {
+    if (!["teacher", "hostel", "campus"].includes(category)) {
+      return res.status(400).json({ message: "Invalid feedback category" });
+    }
+
+    if (category === "teacher" && (!teacherId || !mongoose.Types.ObjectId.isValid(teacherId))) {
       return res.status(400).json({ message: "Invalid teacherId" });
     }
 
@@ -147,7 +223,9 @@ router.post("/", authenticateToken, async (req, res) => {
     if (!student) return res.status(404).json({ message: "User not found" });
 
     const shouldEnforceAttendance =
-      student.role === "student" && student.attendanceVerified !== false;
+      category === "teacher" &&
+      student.role === "student" &&
+      student.attendanceVerified !== false;
 
     if (shouldEnforceAttendance && student.attendance < 75) {
       return res.status(403).json({
@@ -155,15 +233,7 @@ router.post("/", authenticateToken, async (req, res) => {
       });
     }
 
-
-    const textToAnalyze = `
-Teaching Quality: ${responses.teachingQuality}
-Clarity: ${responses.clarity}
-Support: ${responses.support}
-Engagement: ${responses.engagement}
-Comments: ${responses.additionalComments}
-`;
-
+    const textToAnalyze = buildFeedbackText(category, responses);
     const sentiment = await getSentiment(textToAnalyze);
 
     const feedback = new Feedback({
@@ -286,12 +356,58 @@ router.get("/admin/stats", authenticateToken, async (req, res) => {
     const feedback = await Feedback.find().populate("userId", "username role");
     const uniqueStudents = await Feedback.distinct("userId");
 
+    const teacherFeedback = feedback.filter((f) => f.category === "teacher");
+    const hostelFeedback = feedback.filter((f) => f.category === "hostel");
+    const campusFeedback = feedback.filter((f) => f.category === "campus");
+
+    const countSentiment = (items = []) =>
+      items.reduce(
+        (acc, curr) => {
+          const key = (curr.sentiment || "").toLowerCase();
+          if (acc[key] !== undefined) acc[key]++;
+          return acc;
+        },
+        { positive: 0, neutral: 0, negative: 0 }
+      );
+
+    const buildAiSummary = async (items, entityType, entityName) => {
+      if (!items.length) {
+        return {
+          summary: `No ${entityType.toLowerCase()} feedback yet.`,
+          improvementAreas: []
+        };
+      }
+      const texts = items.map((f) => buildFeedbackText(f.category, f.responses));
+      try {
+        return await callGroqInsights(texts, {
+          entityType,
+          entityName,
+          roleDescriptor: `analyst reviewing ${entityType.toLowerCase()} experience`
+        });
+      } catch (err) {
+        console.error(`AI analysis failed for ${entityType}:`, err.message);
+        return {
+          summary: `AI analysis failed: ${err.message || "unknown error"}`,
+          improvementAreas: []
+        };
+      }
+    };
+
+    const [hostelAiSummary, campusAiSummary] = await Promise.all([
+      buildAiSummary(hostelFeedback, "Hostel", "Hostel services"),
+      buildAiSummary(campusFeedback, "Campus", "Campus facilities")
+    ]);
+
     res.json({
       totalStudentsWithFeedback: uniqueStudents.length,
       totalFeedback: feedback.length,
-      teacherFeedback: feedback.filter((f) => f.category === "teacher"),
-      hostelFeedback: feedback.filter((f) => f.category === "hostel"),
-      campusFeedback: feedback.filter((f) => f.category === "campus")
+      teacherFeedback,
+      hostelFeedback,
+      campusFeedback,
+      hostelSentiment: countSentiment(hostelFeedback),
+      campusSentiment: countSentiment(campusFeedback),
+      hostelAiSummary,
+      campusAiSummary
     });
   } catch (err) {
     console.error("Admin stats error:", err);
