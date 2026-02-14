@@ -1,36 +1,76 @@
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, accuracy_score
 import pickle
 import os
 
-# Show where we are running from
-print("CWD:", os.getcwd())
+print("Training Sentiment Model...")
 
-# Load dataset (CSV placed in the same ml folder)
-csv_path = os.path.join(os.path.dirname(__file__), "student_feedback_1000.csv")
-print("Loading dataset from:", csv_path)
-
+# -------------------------------------------------
+# LOAD DATASET
+# -------------------------------------------------
+csv_path = os.path.join(os.path.dirname(__file__), "student_feedback_1000_domain_matched.csv")
 df = pd.read_csv(csv_path)
 
-X = df["feedback"]
+# Remove duplicates
+df = df.drop_duplicates(subset="feedback")
+
+print("\nDataset Size:", len(df))
+print("\nLabel Distribution:")
+print(df["label"].value_counts())
+
+# -------------------------------------------------
+# PREPARE DATA
+# -------------------------------------------------
+X = df["feedback"].astype(str).str.lower().str.strip()
 y = df["label"]
 
-# Build TF-IDF
-tfidf = TfidfVectorizer(max_features=5000, stop_words="english")
-X_vec = tfidf.fit_transform(X)
+# -------------------------------------------------
+# TRAIN TEST SPLIT (PREVENT DATA LEAKAGE)
+# -------------------------------------------------
+X_train_text, X_test_text, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
 
-# Train Logistic Regression
-model = LogisticRegression(max_iter=2000)
-model.fit(X_vec, y)
+# -------------------------------------------------
+# TF-IDF WITH BIGRAMS
+# -------------------------------------------------
+tfidf = TfidfVectorizer(
+    max_features=7000,
+    ngram_range=(1, 2)
+)
 
-# Save model and vectorizer in the SAME ml folder
+X_train = tfidf.fit_transform(X_train_text)
+X_test = tfidf.transform(X_test_text)
+
+# -------------------------------------------------
+# TRAIN MODEL
+# -------------------------------------------------
+model = LogisticRegression(
+    max_iter=3000,
+    class_weight="balanced"
+)
+
+model.fit(X_train, y_train)
+
+# -------------------------------------------------
+# EVALUATE MODEL
+# -------------------------------------------------
+y_pred = model.predict(X_test)
+
+print("\nModel Accuracy:", accuracy_score(y_test, y_pred))
+print("\nClassification Report:\n")
+print(classification_report(y_test, y_pred))
+
+# -------------------------------------------------
+# SAVE MODEL
+# -------------------------------------------------
 model_path = os.path.join(os.path.dirname(__file__), "sentiment_model.pkl")
 tfidf_path = os.path.join(os.path.dirname(__file__), "tfidf.pkl")
 
 pickle.dump(model, open(model_path, "wb"))
 pickle.dump(tfidf, open(tfidf_path, "wb"))
 
-print("Model trained and saved!")
-print("Model file:", model_path)
-print("TFIDF file:", tfidf_path)
+print("\nModel saved successfully.")
