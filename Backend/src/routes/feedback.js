@@ -268,9 +268,11 @@ router.get("/teacher/stats", authenticateToken, async (req, res) => {
 
     const teacherId = req.user.userId;
 
+    const teacherObjectId = new mongoose.Types.ObjectId(teacherId);
+
     const feedbacks = await Feedback.find({
       category: "teacher",
-      teacherId
+      teacherId: teacherObjectId
     })
       .sort({ createdAt: -1 })
       .populate("userId", "username role");
@@ -329,11 +331,38 @@ Comments: ${f.responses.additionalComments}
       aiOutput.improvementAreas = ["AI did not return improvement areas. Try adding more detailed feedback."];
     }
 
+    // Monthly trend for teacher feedback
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthlyTrendAggregation = await Feedback.aggregate([
+      {
+        $match: {
+          category: "teacher",
+          teacherId: teacherObjectId
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$createdAt" },
+            month: { $month: "$createdAt" }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { "_id.year": 1, "_id.month": 1 } }
+    ]);
+
+    const monthlyTrend = monthlyTrendAggregation.map((item) => ({
+      month: `${monthNames[item._id.month - 1]} ${item._id.year}`,
+      count: item.count
+    }));
+
     res.json({
       totalFeedback: feedbacks.length,
       positive: sentimentCount.positive,
       neutral: sentimentCount.neutral,
       negative: sentimentCount.negative,
+      monthlyTrend,
       improvementAreas: aiOutput.improvementAreas,
       summary: aiOutput.summary,
       feedbacks: feedbacks.slice(0, 5)
