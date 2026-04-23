@@ -1,5 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const Feedback = require('../models/Feedback');
 const User = require('../models/User');
 
 const router = express.Router();
@@ -27,6 +28,7 @@ router.post('/register', async (req, res) => {
       role: normalizedRole,
       subject,
       attendance: initialAttendance,
+      feedbackResubmissionCredits: 0,
       marks,
       attendanceVerified: isStudent ? (initialAttendance !== undefined && initialAttendance !== null) : true
     });
@@ -54,10 +56,20 @@ router.post('/register', async (req, res) => {
 // Login
 router.post('/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password, role } = req.body;
+    const normalizedRole = typeof role === 'string' ? role.toLowerCase().trim() : '';
+    const validRoles = ['student', 'teacher', 'admin'];
+
+    if (!validRoles.includes(normalizedRole)) {
+      return res.status(400).json({ message: 'Please select a valid role to login' });
+    }
 
     // Special case for admin login
     if (username === 'admin' && password === 'admin') {
+      if (normalizedRole !== 'admin') {
+        return res.status(403).json({ message: 'Selected role does not match account role' });
+      }
+
       const token = jwt.sign(
         { userId: 'admin', username: 'admin', role: 'admin' },
         process.env.JWT_SECRET || 'your-secret-key',
@@ -81,6 +93,10 @@ router.post('/login', async (req, res) => {
     const isValidPassword = await user.comparePassword(password);
     if (!isValidPassword) {
       return res.status(401).json({ message: 'Invalid username or password' });
+    }
+
+    if (user.role !== normalizedRole) {
+      return res.status(403).json({ message: 'Selected role does not match account role' });
     }
 
     // Generate JWT token
@@ -109,8 +125,33 @@ router.post('/logout', (req, res) => {
 // Get all users (admin only)
 router.get('/users', async (req, res) => {
   try {
-    const users = await User.find({}, 'username email role subject attendance attendanceVerified createdAt');
-    res.json(users);
+    const [users, feedbackCounts] = await Promise.all([
+      User.find({}, 'username email role subject attendance attendanceVerified createdAt feedbackResubmissionCredits').lean(),
+      Feedback.aggregate([
+        {
+          $group: {
+            _id: '$userId',
+            feedbackCount: { $sum: 1 }
+          }
+        }
+      ])
+    ]);
+
+    const feedbackCountMap = new Map(
+      feedbackCounts.map((item) => [String(item._id), item.feedbackCount || 0])
+    );
+
+    const usersWithFeedbackStatus = users.map((user) => {
+      const feedbackCount = feedbackCountMap.get(String(user._id)) || 0;
+
+      return {
+        ...user,
+        feedbackCount,
+        hasSubmittedFeedback: feedbackCount > 0
+      };
+    });
+
+    res.json(usersWithFeedbackStatus);
   } catch (error) {
     console.error('Error fetching users:', error);
     res.status(500).json({ message: 'Server error' });
@@ -134,8 +175,14 @@ router.delete('/users/:id', async (req, res) => {
 // Update user (admin only)
 router.put('/users/:id', async (req, res) => {
   try {
-    const { username, email, role, subject, attendance, marks } = req.body;
-    const updateData = { username, email, role, subject };
+    const { username, email, role, subject, attendance, marks, feedbackResubmissionCredits } = req.body;
+    const updateData = {};
+
+    if (username !== undefined) updateData.username = username;
+    if (email !== undefined) updateData.email = email;
+    if (role !== undefined) updateData.role = typeof role === 'string' ? role.toLowerCase() : role;
+    if (subject !== undefined) updateData.subject = subject;
+
     if (attendance !== undefined) {
       updateData.attendance = attendance;
       updateData.attendanceVerified = true;
@@ -143,6 +190,18 @@ router.put('/users/:id', async (req, res) => {
     if (marks !== undefined) {
       updateData.marks = marks;
     }
+    if (feedbackResubmissionCredits !== undefined) {
+      const parsedCredits = Number(feedbackResubmissionCredits);
+      if (!Number.isInteger(parsedCredits) || parsedCredits < 0) {
+        return res.status(400).json({ message: 'feedbackResubmissionCredits must be a non-negative integer' });
+      }
+      updateData.feedbackResubmissionCredits = parsedCredits;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ message: 'No valid fields provided for update' });
+    }
+
     const user = await User.findByIdAndUpdate(
       req.params.id,
       updateData,
@@ -154,6 +213,40 @@ router.put('/users/:id', async (req, res) => {
     res.json({ message: 'User updated successfully', user });
   } catch (error) {
     console.error('Error updating user:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/users/:id/resubmission', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select('role feedbackResubmissionCredits');
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (user.role !== 'student') {
+      return res.status(400).json({ message: 'Only students can receive feedback resubmission access' });
+    }
+
+    const feedbackCount = await Feedback.countDocuments({ userId: user._id });
+
+    if (feedbackCount === 0) {
+      return res.status(400).json({ message: 'This student has not submitted feedback yet' });
+    }
+
+    user.feedbackResubmissionCredits = (user.feedbackResubmissionCredits || 0) + 1;
+    await user.save();
+
+    res.json({
+      message: 'Feedback resubmission granted successfully',
+      user: {
+        _id: user._id,
+        feedbackResubmissionCredits: user.feedbackResubmissionCredits
+      }
+    });
+  } catch (error) {
+    console.error('Error granting feedback resubmission:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

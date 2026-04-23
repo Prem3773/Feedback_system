@@ -44,6 +44,11 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  feedbackResubmissionCredits: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   marks: {
     type: Number,
     default: 0,

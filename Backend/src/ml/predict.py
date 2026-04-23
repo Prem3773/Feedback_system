@@ -1,6 +1,8 @@
 import sys
 import pickle
 import os
+import json
+import numpy as np
 
 base_dir = os.path.dirname(__file__)
 
@@ -13,6 +15,14 @@ text = sys.argv[1]
 text = text.lower().strip()
 
 vector = tfidf.transform([text])
-prediction = model.predict(vector)[0]
 
-print(prediction)
+classes = list(model.classes_)
+proba = model.predict_proba(vector)[0]
+best_idx = int(np.argmax(proba))
+prediction = classes[best_idx]
+confidence = float(proba[best_idx])
+
+print(json.dumps({
+    "label": prediction,
+    "confidence": confidence
+}))

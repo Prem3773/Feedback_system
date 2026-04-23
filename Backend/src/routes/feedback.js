@@ -187,6 +187,26 @@ const buildFeedbackText = (category = "", responses = {}) => {
   ].join("\n");
 };
 
+const buildSentimentInput = (responses = {}) =>
+  Object.values(responses || {})
+    .filter((value) => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join(" ");
+
+const DUPLICATE_FEEDBACK_MESSAGE =
+  "You have submitted feedback. Contact admin for resubmission.";
+
+const buildDuplicateFilter = (userId, category, teacherId) => {
+  const duplicateFilter = { userId, category };
+
+  if (category === "teacher") {
+    duplicateFilter.teacherId = teacherId;
+  }
+
+  return duplicateFilter;
+};
+
 /* ---------------------------------------------
    JWT AUTH MIDDLEWARE
 --------------------------------------------- */
@@ -206,10 +226,14 @@ const authenticateToken = (req, res, next) => {
    SUBMIT FEEDBACK
 --------------------------------------------- */
 router.post("/", authenticateToken, async (req, res) => {
+  let resubmissionReserved = false;
+  let reservationUserId = null;
+
   try {
     const { responses = {}, teacherId } = req.body;
     const category = (req.body.category || "").toLowerCase();
     const userId = req.user.userId;
+    reservationUserId = userId;
 
     if (!["teacher", "hostel", "campus"].includes(category)) {
       return res.status(400).json({ message: "Invalid feedback category" });
@@ -221,10 +245,11 @@ router.post("/", authenticateToken, async (req, res) => {
 
     const student = await User.findById(userId);
     if (!student) return res.status(404).json({ message: "User not found" });
+    const normalizedRole = String(student.role || "").toLowerCase();
 
     const shouldEnforceAttendance =
       category === "teacher" &&
-      student.role === "student" &&
+      normalizedRole === "student" &&
       student.attendanceVerified !== false;
 
     if (shouldEnforceAttendance && student.attendance < 75) {
@@ -233,7 +258,45 @@ router.post("/", authenticateToken, async (req, res) => {
       });
     }
 
-    const textToAnalyze = buildFeedbackText(category, responses);
+    let remainingResubmissionCredits = student.feedbackResubmissionCredits || 0;
+
+    const duplicateFilter = buildDuplicateFilter(userId, category, teacherId);
+    const existingFeedback = await Feedback.findOne(duplicateFilter).select("_id");
+
+    if (existingFeedback) {
+      if (normalizedRole === "student") {
+        const updatedStudent = await User.findOneAndUpdate(
+          {
+            _id: userId,
+            feedbackResubmissionCredits: { $gt: 0 }
+          },
+          {
+            $inc: {
+              feedbackResubmissionCredits: -1
+            }
+          },
+          {
+            new: true,
+            runValidators: true
+          }
+        ).select("feedbackResubmissionCredits");
+
+        if (!updatedStudent) {
+          return res.status(409).json({
+            message: DUPLICATE_FEEDBACK_MESSAGE
+          });
+        }
+
+        resubmissionReserved = true;
+        remainingResubmissionCredits = updatedStudent.feedbackResubmissionCredits || 0;
+      } else {
+        return res.status(409).json({
+          message: DUPLICATE_FEEDBACK_MESSAGE
+        });
+      }
+    }
+
+    const textToAnalyze = buildSentimentInput(responses);
     const sentiment = await getSentiment(textToAnalyze);
 
     const feedback = new Feedback({
@@ -249,9 +312,23 @@ router.post("/", authenticateToken, async (req, res) => {
     res.status(201).json({
       message: "Feedback submitted successfully",
       sentiment,
-      feedback
+      feedback,
+      feedbackResubmissionCredits: remainingResubmissionCredits,
+      resubmissionUsed: resubmissionReserved
     });
   } catch (err) {
+    if (resubmissionReserved && reservationUserId) {
+      try {
+        await User.findByIdAndUpdate(reservationUserId, {
+          $inc: {
+            feedbackResubmissionCredits: 1
+          }
+        });
+      } catch (rollbackError) {
+        console.error("Feedback resubmission rollback error:", rollbackError);
+      }
+    }
+
     console.error("Feedback submission error:", err);
     res.status(500).json({ message: "Server error" });
   }
@@ -382,8 +459,10 @@ router.get("/admin/stats", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    const feedback = await Feedback.find().populate("userId", "username role");
-    const uniqueStudents = await Feedback.distinct("userId");
+    const [feedback, uniqueStudents] = await Promise.all([
+      Feedback.find().populate("userId", "username role"),
+      Feedback.distinct("userId")
+    ]);
 
     const teacherFeedback = feedback.filter((f) => f.category === "teacher");
     const hostelFeedback = feedback.filter((f) => f.category === "hostel");
